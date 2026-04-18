@@ -87,6 +87,8 @@ def remove_edge_white_background(img, threshold=242, soften=1.2):
 load_dotenv()  # loads variables from .env
 SHOPIFY_TOKEN = os.getenv("SHOPIFY_TOKEN")
 SHOPIFY_STORE_URL = os.getenv("SHOPIFY_STORE_URL")  # ← paste your token here
+PHOTOROOM_API_KEY = os.getenv("PHOTOROOM_API_KEY", "").strip()
+PHOTOROOM_ENDPOINT = os.getenv("PHOTOROOM_ENDPOINT", "https://sdk.photoroom.com/v1/segment")
 
 METAFIELD_NAMESPACE = "custom"
 METAFIELD_KEY       = "case_size"     # your metafield key
@@ -168,6 +170,10 @@ def image_to_base64(img):
 
 def load_font(size):
     font_paths = [
+        # Preferred heavy/rounded display fonts first.
+        "C:/Windows/Fonts/arlrdbd.ttf",
+        "C:/Windows/Fonts/seguibl.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
@@ -192,6 +198,41 @@ def resize_to_fit(img, max_width, max_height):
     scale = max(scale, 0.01)
     new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
     return img.resize(new_size, Image.LANCZOS)
+
+
+def pil_image_to_png_bytes(img):
+    buf = io.BytesIO()
+    img.convert("RGBA").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def remove_background_with_photoroom(img):
+    """Use PhotoRoom cutout when API key is configured."""
+    if not PHOTOROOM_API_KEY:
+        return None
+
+    try:
+        image_bytes = pil_image_to_png_bytes(img)
+        r = requests.post(
+            PHOTOROOM_ENDPOINT,
+            headers={"x-api-key": PHOTOROOM_API_KEY},
+            files={"image_file": ("source.png", image_bytes, "image/png")},
+            timeout=60,
+        )
+        r.raise_for_status()
+        cutout = Image.open(io.BytesIO(r.content)).convert("RGBA")
+        return trim_transparent(cutout)
+    except Exception as e:
+        print(f"  ⚠ PhotoRoom cutout failed, using local fallback: {e}")
+        return None
+
+
+def prepare_product_cutout(img):
+    """PhotoRoom first; edge-connected white removal fallback."""
+    cutout = remove_background_with_photoroom(img)
+    if cutout is not None:
+        return cutout
+    return remove_edge_white_background(img, threshold=252)
 
 
 # ─── Image generation ─────────────────────────────────────
@@ -220,12 +261,12 @@ def get_fan_configs(pack_qty, is_wide=False):
         if is_wide:
             scale = max(0.76, 1.0 - abs_dist * 0.06)
             x_offset = int(dist * 85)
-            y_shift = int(abs_dist * 16)
+            y_shift = 0
             angle = int(dist * 2)
         else:
             scale = max(0.70, 1.0 - abs_dist * 0.08)
             x_offset = int(dist * 120)
-            y_shift = int(abs_dist * 18)
+            y_shift = 0
             angle = int(dist * 4)
 
         configs.append((x_offset, y_shift, scale, angle))
@@ -237,8 +278,8 @@ def generate_composite(product_img, pack_qty):
     canvas = Image.new("RGBA", CANVAS_SIZE, bg)
     cw, ch = CANVAS_SIZE
 
-    # Banana-Boat style clean cutout: remove border-connected white studio background.
-    product = remove_edge_white_background(product_img, threshold=252)
+    # PhotoRoom cutout when configured; otherwise local border-connected white removal.
+    product = prepare_product_cutout(product_img)
     is_wide = product.width > product.height
 
     configs = get_fan_configs(pack_qty, is_wide=is_wide)
@@ -281,15 +322,16 @@ def generate_composite(product_img, pack_qty):
         y = anchor_y - ih + oy
         paste_clean(canvas, item, x, y)
 
-    # Compact circular badge.
+    # High-contrast badge with white ring.
     draw = ImageDraw.Draw(canvas)
     bx, by = int(cw * 0.80), int(ch * (0.73 if is_wide else 0.72))
-    br = 94
+    br_outer = 104
+    br_inner = 100
+    draw.ellipse((bx - br_outer, by - br_outer, bx + br_outer, by + br_outer), fill=(255, 255, 255, 255))
+    draw.ellipse((bx - br_inner, by - br_inner, bx + br_inner, by + br_inner), fill=(225, 74, 92, 255))
 
-    draw.ellipse((bx - br, by - br, bx + br, by + br), fill=(225, 74, 92, 255))
-
-    font_num = load_font(62)
-    font_pack = load_font(34)
+    font_num = load_font(80)
+    font_pack = load_font(48)
 
     num_text = str(pack_qty)
     pack_text = "Pack"
@@ -297,17 +339,20 @@ def generate_composite(product_img, pack_qty):
     b1 = draw.textbbox((0, 0), num_text, font=font_num)
     b2 = draw.textbbox((0, 0), pack_text, font=font_pack)
 
+    # Use visual bounds so text is optically centered in the badge.
     w1 = b1[2] - b1[0]
     h1 = b1[3] - b1[1]
+    off1 = b1[1]
     w2 = b2[2] - b2[0]
     h2 = b2[3] - b2[1]
+    off2 = b2[1]
 
-    line_gap = 8
+    line_gap = 4
     total_h = h1 + h2 + line_gap
     top_y = by - total_h // 2
 
-    draw.text((bx - w1 // 2, top_y), num_text, font=font_num, fill=(255, 255, 255, 255))
-    draw.text((bx - w2 // 2, top_y + h1 + line_gap), pack_text, font=font_pack, fill=(255, 255, 255, 255))
+    draw.text((bx - w1 // 2, top_y - off1), num_text, font=font_num, fill=(255, 255, 255, 255))
+    draw.text((bx - w2 // 2, top_y + h1 + line_gap - off2), pack_text, font=font_pack, fill=(255, 255, 255, 255))
 
     # NO bottom text
     final = Image.new("RGB", CANVAS_SIZE, (255, 255, 255))
