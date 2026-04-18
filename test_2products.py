@@ -18,7 +18,8 @@ SETUP:
 """
 
 import requests, time, io, os, base64, re
-from PIL import Image, ImageDraw, ImageFont
+from collections import deque
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from dotenv import load_dotenv
 
 
@@ -27,6 +28,59 @@ def trim_transparent(img):
     if bbox:
         return img.crop(bbox)
     return img
+
+
+def remove_edge_white_background(img, threshold=242, soften=1.2):
+    """
+    Remove only white pixels connected to image borders.
+    This preserves product whites while dropping flat studio backdrops.
+    """
+    img = img.convert("RGBA")
+    w, h = img.size
+    px = img.load()
+    alpha = Image.new("L", (w, h), 255)
+    am = alpha.load()
+
+    visited = [[False for _ in range(w)] for _ in range(h)]
+    q = deque()
+
+    def is_bg(r, g, b):
+        lum = (r + g + b) / 3
+        chroma = max(r, g, b) - min(r, g, b)
+        return lum >= threshold and chroma <= 28
+
+    def enqueue(x, y):
+        if visited[y][x]:
+            return
+        r, g, b, _ = px[x, y]
+        if not is_bg(r, g, b):
+            return
+        visited[y][x] = True
+        q.append((x, y))
+
+    for x in range(w):
+        enqueue(x, 0)
+        enqueue(x, h - 1)
+    for y in range(h):
+        enqueue(0, y)
+        enqueue(w - 1, y)
+
+    while q:
+        x, y = q.popleft()
+        am[x, y] = 0
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if nx < 0 or ny < 0 or nx >= w or ny >= h:
+                continue
+            if visited[ny][nx]:
+                continue
+            r, g, b, _ = px[nx, ny]
+            if is_bg(r, g, b):
+                visited[ny][nx] = True
+                q.append((nx, ny))
+
+    alpha = alpha.filter(ImageFilter.GaussianBlur(soften))
+    img.putalpha(alpha)
+    return trim_transparent(img)
 
 
 # ─── CONFIG ───────────────────────────────────────────────
@@ -179,12 +233,12 @@ def get_fan_configs(pack_qty, is_wide=False):
     return configs
 
 def generate_composite(product_img, pack_qty):
-    bg = (245, 245, 245, 255)
+    bg = (255, 255, 255, 255)
     canvas = Image.new("RGBA", CANVAS_SIZE, bg)
     cw, ch = CANVAS_SIZE
 
-    # Preserve original product pixels to avoid rough edge cutouts.
-    product = trim_transparent(product_img.convert("RGBA"))
+    # Banana-Boat style clean cutout: remove border-connected white studio background.
+    product = remove_edge_white_background(product_img, threshold=252)
     is_wide = product.width > product.height
 
     configs = get_fan_configs(pack_qty, is_wide=is_wide)
@@ -227,7 +281,7 @@ def generate_composite(product_img, pack_qty):
         y = anchor_y - ih + oy
         paste_clean(canvas, item, x, y)
 
-    # Badge with requested red tone and clear number/label spacing.
+    # Compact circular badge.
     draw = ImageDraw.Draw(canvas)
     bx, by = int(cw * 0.80), int(ch * (0.73 if is_wide else 0.72))
     br = 94
@@ -256,7 +310,7 @@ def generate_composite(product_img, pack_qty):
     draw.text((bx - w2 // 2, top_y + h1 + line_gap), pack_text, font=font_pack, fill=(255, 255, 255, 255))
 
     # NO bottom text
-    final = Image.new("RGB", CANVAS_SIZE, (245, 245, 245))
+    final = Image.new("RGB", CANVAS_SIZE, (255, 255, 255))
     final.paste(canvas, mask=canvas.split()[-1])
     return final
 
