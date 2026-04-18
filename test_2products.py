@@ -17,33 +17,9 @@ SETUP:
 =============================================================
 """
 
-import requests, time, io, math, os, base64, re
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import requests, time, io, os, base64, re
+from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
-import os
-
-def remove_white_background(img, threshold=245, soften=8):
-    img = img.convert("RGBA")
-    pixels = img.load()
-    w, h = img.size
-
-    for y in range(h):
-        for x in range(w):
-            r, g, b, a = pixels[x, y]
-
-            # fully remove very white pixels
-            if r >= threshold and g >= threshold and b >= threshold:
-                pixels[x, y] = (255, 255, 255, 0)
-            else:
-                # soften near-white edge pixels instead of leaving harsh halo
-                avg = (r + g + b) / 3
-                if avg > threshold - 25:
-                    new_alpha = max(0, min(255, int(a * 0.65)))
-                    pixels[x, y] = (r, g, b, new_alpha)
-
-    alpha = img.split()[-1].filter(ImageFilter.GaussianBlur(soften * 0.25))
-    img.putalpha(alpha)
-    return img
 
 
 def trim_transparent(img):
@@ -52,19 +28,6 @@ def trim_transparent(img):
         return img.crop(bbox)
     return img
 
-
-def load_font(size):
-    font_paths = [
-        "C:/Windows/Fonts/arialbd.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-    ]
-    for path in font_paths:
-        try:
-            return ImageFont.truetype(path, size)
-        except:
-            pass
-    return ImageFont.load_default()
 
 # ─── CONFIG ───────────────────────────────────────────────
 load_dotenv()  # loads variables from .env
@@ -163,62 +126,23 @@ def load_font(size):
     return ImageFont.load_default()
 
 
-def resize_to_height(img, target_height):
-    w, h = img.size
-    ratio = target_height / h
-    return img.resize((int(w * ratio), target_height), Image.LANCZOS)
-
-
-def make_shadow_from_alpha(img, blur_radius=18, opacity=55):
-    alpha = img.split()[-1]
-    shadow_alpha = alpha.filter(ImageFilter.GaussianBlur(blur_radius))
-
-    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    shadow.putalpha(shadow_alpha)
-
-    px = shadow.load()
-    w, h = shadow.size
-    for y in range(h):
-        for x in range(w):
-            r, g, b, a = px[x, y]
-            px[x, y] = (0, 0, 0, min(a, opacity))
-    return shadow
-
-
 def paste_clean(canvas, img, x, y):
     canvas.alpha_composite(img, (x, y))
 
 
-def resize_to_height(img, target_height):
+def resize_to_fit(img, max_width, max_height):
     w, h = img.size
-    ratio = target_height / h
-    return img.resize((int(w * ratio), target_height), Image.LANCZOS)
-
-
-def make_shadow(img, blur_radius=16, opacity=90):
-    alpha = img.split()[-1]
-    shadow_mask = alpha.filter(ImageFilter.GaussianBlur(blur_radius))
-
-    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    shadow.putalpha(shadow_mask)
-
-    px = shadow.load()
-    for y in range(shadow.size[1]):
-        for x in range(shadow.size[0]):
-            r, g, b, a = px[x, y]
-            px[x, y] = (0, 0, 0, min(a, opacity))
-    return shadow
-
-
-def paste_with_shadow(canvas, img, x, y, shadow_dx=10, shadow_dy=14):
-    shadow = make_shadow(img)
-    canvas.alpha_composite(shadow, (x + shadow_dx, y + shadow_dy))
-    canvas.alpha_composite(img, (x, y))
+    if w <= 0 or h <= 0:
+        return img
+    scale = min(max_width / w, max_height / h)
+    scale = max(scale, 0.01)
+    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+    return img.resize(new_size, Image.LANCZOS)
 
 
 # ─── Image generation ─────────────────────────────────────
 
-def get_fan_configs(pack_qty):
+def get_fan_configs(pack_qty, is_wide=False):
     """
     Clean fan layout.
     For large packs, show a designed representation instead of all units.
@@ -239,10 +163,16 @@ def get_fan_configs(pack_qty):
         dist = i - center
         abs_dist = abs(dist)
 
-        scale = max(0.70, 1.0 - abs_dist * 0.08)
-        x_offset = int(dist * 120)
-        y_shift = int(abs_dist * 18)
-        angle = int(dist * 4)
+        if is_wide:
+            scale = max(0.76, 1.0 - abs_dist * 0.06)
+            x_offset = int(dist * 85)
+            y_shift = int(abs_dist * 16)
+            angle = int(dist * 2)
+        else:
+            scale = max(0.70, 1.0 - abs_dist * 0.08)
+            x_offset = int(dist * 120)
+            y_shift = int(abs_dist * 18)
+            angle = int(dist * 4)
 
         configs.append((x_offset, y_shift, scale, angle))
 
@@ -253,20 +183,22 @@ def generate_composite(product_img, pack_qty):
     canvas = Image.new("RGBA", CANVAS_SIZE, bg)
     cw, ch = CANVAS_SIZE
 
-    # clean product cutout
-    product = remove_white_background(product_img)
-    product = trim_transparent(product)
+    # Preserve original product pixels to avoid rough edge cutouts.
+    product = trim_transparent(product_img.convert("RGBA"))
+    is_wide = product.width > product.height
 
-    configs = get_fan_configs(pack_qty)
+    configs = get_fan_configs(pack_qty, is_wide=is_wide)
 
-    # Bigger hero, cleaner composition
-    hero_height = int(ch * 0.58)
-    hero = resize_to_height(product, hero_height)
-
-    back_height_base = int(hero_height * 0.82)
+    if is_wide:
+        hero = resize_to_fit(product, int(cw * 0.62), int(ch * 0.34))
+        anchor_y = int(ch * 0.74)
+        back_scale_base = 0.84
+    else:
+        hero = resize_to_fit(product, int(cw * 0.40), int(ch * 0.60))
+        anchor_y = int(ch * 0.84)
+        back_scale_base = 0.82
 
     anchor_x = cw // 2
-    anchor_y = int(ch * 0.84)
     center_idx = len(configs) // 2
 
     prepared = []
@@ -274,8 +206,11 @@ def generate_composite(product_img, pack_qty):
         if idx == center_idx:
             item = hero.copy()
         else:
-            target_h = int(back_height_base * scale)
-            item = resize_to_height(product, target_h)
+            item = resize_to_fit(
+                product,
+                int(hero.width * back_scale_base * scale),
+                int(hero.height * back_scale_base * scale),
+            )
 
         if angle != 0:
             item = item.rotate(-angle, expand=True, resample=Image.BICUBIC)
@@ -292,15 +227,14 @@ def generate_composite(product_img, pack_qty):
         y = anchor_y - ih + oy
         paste_clean(canvas, item, x, y)
 
-    # clean orange badge only
+    # Badge with requested red tone and clear number/label spacing.
     draw = ImageDraw.Draw(canvas)
-    bx, by = int(cw * 0.80), int(ch * 0.72)
-    br = 92
+    bx, by = int(cw * 0.80), int(ch * (0.73 if is_wide else 0.72))
+    br = 94
 
-    # subtle badge shadow
-    draw.ellipse((bx - br, by - br, bx + br, by + br), fill=(245, 136, 27, 255))
+    draw.ellipse((bx - br, by - br, bx + br, by + br), fill=(225, 74, 92, 255))
 
-    font_num = load_font(64)
+    font_num = load_font(62)
     font_pack = load_font(34)
 
     num_text = str(pack_qty)
@@ -314,11 +248,12 @@ def generate_composite(product_img, pack_qty):
     w2 = b2[2] - b2[0]
     h2 = b2[3] - b2[1]
 
-    total_h = h1 + h2 - 8
+    line_gap = 8
+    total_h = h1 + h2 + line_gap
     top_y = by - total_h // 2
 
     draw.text((bx - w1 // 2, top_y), num_text, font=font_num, fill=(255, 255, 255, 255))
-    draw.text((bx - w2 // 2, top_y + h1 - 8), pack_text, font=font_pack, fill=(255, 255, 255, 255))
+    draw.text((bx - w2 // 2, top_y + h1 + line_gap), pack_text, font=font_pack, fill=(255, 255, 255, 255))
 
     # NO bottom text
     final = Image.new("RGB", CANVAS_SIZE, (245, 245, 245))
