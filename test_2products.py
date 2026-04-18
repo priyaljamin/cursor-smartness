@@ -220,12 +220,12 @@ def get_fan_configs(pack_qty, is_wide=False):
         if is_wide:
             scale = max(0.76, 1.0 - abs_dist * 0.06)
             x_offset = int(dist * 85)
-            y_shift = int(abs_dist * 16)
+            y_shift = 0
             angle = int(dist * 2)
         else:
             scale = max(0.70, 1.0 - abs_dist * 0.08)
             x_offset = int(dist * 120)
-            y_shift = int(abs_dist * 18)
+            y_shift = 0
             angle = int(dist * 4)
 
         configs.append((x_offset, y_shift, scale, angle))
@@ -281,15 +281,24 @@ def generate_composite(product_img, pack_qty):
         y = anchor_y - ih + oy
         paste_clean(canvas, item, x, y)
 
-    # Compact circular badge.
+    # Draw badge on top for clear visibility like reference pack shots.
     draw = ImageDraw.Draw(canvas)
     bx, by = int(cw * 0.80), int(ch * (0.73 if is_wide else 0.72))
-    br = 94
+    br_outer = 108
+    br_inner = 90
 
-    draw.ellipse((bx - br, by - br, bx + br, by + br), fill=(225, 74, 92, 255))
+    # BananaBoat-style badge with visible white ring.
+    draw.ellipse(
+        (bx - br_outer, by - br_outer, bx + br_outer, by + br_outer),
+        fill=(255, 255, 255, 255),
+    )
+    draw.ellipse(
+        (bx - br_inner, by - br_inner, bx + br_inner, by + br_inner),
+        fill=(225, 74, 92, 255),
+    )
 
-    font_num = load_font(62)
-    font_pack = load_font(34)
+    font_num = load_font(64)
+    font_pack = load_font(31)
 
     num_text = str(pack_qty)
     pack_text = "Pack"
