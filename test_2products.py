@@ -203,8 +203,8 @@ def get_fan_configs(pack_qty, is_wide=False):
     """
     if pack_qty <= 1:
         visible = 1
-    elif pack_qty <= 6:
-        visible = pack_qty
+    elif pack_qty <= 4:
+        visible = 5
     elif pack_qty <= 12:
         visible = 7
     else:
@@ -218,17 +218,13 @@ def get_fan_configs(pack_qty, is_wide=False):
         abs_dist = abs(dist)
 
         if is_wide:
-            scale = max(0.76, 1.0 - abs_dist * 0.06)
-            x_offset = int(dist * 85)
-            y_shift = 0
-            angle = int(dist * 2)
+            scale = max(0.86, 1.0 - abs_dist * 0.03)
+            angle = int(dist * 1)
         else:
-            scale = max(0.70, 1.0 - abs_dist * 0.08)
-            x_offset = int(dist * 120)
-            y_shift = 0
-            angle = int(dist * 4)
+            scale = max(0.84, 1.0 - abs_dist * 0.04)
+            angle = int(dist * 2)
 
-        configs.append((x_offset, y_shift, scale, angle))
+        configs.append((dist, scale, angle))
 
     return configs
 
@@ -255,8 +251,10 @@ def generate_composite(product_img, pack_qty):
     anchor_x = cw // 2
     center_idx = len(configs) // 2
 
+    x_step = 95 if is_wide else 112
+
     prepared = []
-    for idx, (ox, oy, scale, angle) in enumerate(configs):
+    for idx, (dist, scale, angle) in enumerate(configs):
         if idx == center_idx:
             item = hero.copy()
         else:
@@ -269,7 +267,7 @@ def generate_composite(product_img, pack_qty):
         if angle != 0:
             item = item.rotate(-angle, expand=True, resample=Image.BICUBIC)
 
-        prepared.append((item, ox, oy))
+        prepared.append((item, int(dist * x_step), 0))
 
     # draw from farthest to center
     draw_order = sorted(range(len(prepared)), key=lambda i: abs(i - center_idx), reverse=True)
