@@ -218,13 +218,17 @@ def get_fan_configs(pack_qty, is_wide=False):
         abs_dist = abs(dist)
 
         if is_wide:
-            scale = max(0.86, 1.0 - abs_dist * 0.03)
+            scale = max(0.87, 1.0 - abs_dist * 0.03)
             angle = int(dist * 1)
+            # small V for wide items (gum packs)
+            y_shift = int(-abs_dist * 14)
         else:
-            scale = max(0.84, 1.0 - abs_dist * 0.04)
+            scale = max(0.86, 1.0 - abs_dist * 0.035)
             angle = int(dist * 2)
+            # pronounced V: side items sit higher than center
+            y_shift = int(-abs_dist * 22)
 
-        configs.append((dist, scale, angle))
+        configs.append((dist, scale, angle, y_shift))
 
     return configs
 
@@ -251,10 +255,10 @@ def generate_composite(product_img, pack_qty):
     anchor_x = cw // 2
     center_idx = len(configs) // 2
 
-    x_step = 95 if is_wide else 112
+    x_step = 95 if is_wide else 108
 
     prepared = []
-    for idx, (dist, scale, angle) in enumerate(configs):
+    for idx, (dist, scale, angle, y_shift) in enumerate(configs):
         if idx == center_idx:
             item = hero.copy()
         else:
@@ -267,7 +271,7 @@ def generate_composite(product_img, pack_qty):
         if angle != 0:
             item = item.rotate(-angle, expand=True, resample=Image.BICUBIC)
 
-        prepared.append((item, int(dist * x_step), 0))
+        prepared.append((item, int(dist * x_step), y_shift))
 
     # draw from farthest to center
     draw_order = sorted(range(len(prepared)), key=lambda i: abs(i - center_idx), reverse=True)
