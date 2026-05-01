@@ -1,0 +1,7 @@
+pandas
+openpyxl
+requests
+anthropic
+tqdm
+pillow
+python-dotenv
