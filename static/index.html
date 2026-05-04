@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MVW Pipeline Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #242734;
+      --border: #2e3142;
+      --text: #e4e6f0;
+      --text-dim: #8b8fa3;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --radius: 12px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* NAV */
+    .nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      height: 60px;
+      gap: 32px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-logo {
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    .nav-tabs { display: flex; gap: 4px; }
+    .nav-tab {
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.15s;
+      border: none;
+      background: none;
+    }
+    .nav-tab:hover { color: var(--text); background: var(--surface2); }
+    .nav-tab.active { color: var(--text); background: var(--accent); }
+
+    /* LAYOUT */
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+
+    /* CARDS */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* STATS GRID */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+    }
+    .stat-number {
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+    .stat-number.green { color: var(--green); }
+    .stat-number.yellow { color: var(--yellow); }
+    .stat-number.red { color: var(--red); }
+    .stat-number.blue { color: var(--blue); }
+    .stat-number.accent { color: var(--accent); }
+
+    /* BUTTONS */
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-danger { border-color: var(--red); color: var(--red); }
+    .btn-danger:hover { background: var(--red); color: white; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* PRODUCTS GRID */
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .product-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .product-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .product-images {
+      display: flex;
+      height: 200px;
+      background: #fff;
+    }
+    .product-images img {
+      width: 50%;
+      height: 100%;
+      object-fit: contain;
+      padding: 8px;
+    }
+    .product-images .placeholder {
+      width: 50%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-size: 13px;
+      background: #f5f5f5;
+    }
+    .product-info { padding: 16px; }
+    .product-title {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.4;
+      margin-bottom: 8px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .product-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-green { background: rgba(34,197,94,0.15); color: var(--green); }
+    .badge-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
+    .badge-blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+    .product-sku { font-size: 12px; color: var(--text-dim); }
+
+    /* PRODUCT DETAIL MODAL */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      overflow-y: auto;
+      padding: 40px 20px;
+    }
+    .modal-overlay.active { display: block; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 24px;
+    }
+    .modal-header h2 { font-size: 20px; font-weight: 700; margin: 0; }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 24px;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-images {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .modal-img-box {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+      position: relative;
+    }
+    .modal-img-box img {
+      max-width: 100%;
+      max-height: 300px;
+      object-fit: contain;
+    }
+    .modal-img-box .img-label {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #666;
+      background: rgba(255,255,255,0.9);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .modal-img-box .upload-zone {
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 40px 20px;
+      cursor: pointer;
+      color: #999;
+      font-size: 14px;
+      transition: all 0.15s;
+    }
+    .modal-img-box .upload-zone:hover { border-color: var(--accent); color: var(--accent); }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .detail-field label {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .detail-field .value {
+      font-size: 14px;
+      color: var(--text);
+      padding: 8px 12px;
+      background: var(--surface2);
+      border-radius: 6px;
+      min-height: 36px;
+    }
+    .detail-field.full { grid-column: 1 / -1; }
+    .detail-field .value.html-content { line-height: 1.6; }
+
+    /* PIPELINE CONTROLS */
+    .pipeline-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .pipeline-controls select, .pipeline-controls input {
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 14px;
+    }
+    .pipeline-controls label { font-size: 13px; color: var(--text-dim); }
+
+    /* LOG */
+    .log-box {
+      background: #0d0f14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-dim);
+    }
+    .log-box .error { color: var(--red); }
+    .log-box .warn { color: var(--yellow); }
+    .log-box .success { color: var(--green); }
+
+    /* FILTER BAR */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-btn {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { border-color: var(--accent); color: var(--text); }
+    .filter-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    /* UPLOAD AREA */
+    .upload-area {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 16px;
+    }
+    .upload-area:hover { border-color: var(--accent); }
+    .upload-area.dragover { border-color: var(--accent); background: rgba(99,102,241,0.05); }
+    .upload-area h3 { font-size: 18px; margin-bottom: 8px; }
+    .upload-area p { color: var(--text-dim); font-size: 14px; }
+
+    .page-hidden { display: none; }
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--text-dim);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .pagination {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 24px;
+      align-items: center;
+    }
+    .pagination .page-info { font-size: 14px; color: var(--text-dim); }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">MVW Pipeline</div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-page="dashboard">Dashboard</button>
+    <button class="nav-tab" data-page="products">Products</button>
+    <button class="nav-tab" data-page="pipeline">Run Pipeline</button>
+    <button class="nav-tab" data-page="export">Export</button>
+  </div>
+</nav>
+
+<!-- DASHBOARD PAGE -->
+<div class="container page" id="page-dashboard">
+  <div id="upload-section" style="display:none;">
+    <div class="upload-area" id="upload-area">
+      <h3>Upload Input File</h3>
+      <p>Drag & drop your .xlsx file here, or click to browse</p>
+      <input type="file" id="file-input" accept=".xlsx" style="display:none;">
+    </div>
+  </div>
+
+  <div class="stats-grid" id="stats-grid"></div>
+
+  <div class="card">
+    <h2>Quick Actions</h2>
+    <div class="btn-group">
+      <button class="btn btn-primary" onclick="runPipeline('all', 10)">Run Pilot (10 products)</button>
+      <button class="btn" onclick="runPipeline('1', 0)">Stage 1: Lookup UPCs</button>
+      <button class="btn" onclick="runPipeline('2', 0)">Stage 2: Download Images</button>
+      <button class="btn" onclick="runPipeline('3', 0)">Stage 3: Claude Enrichment</button>
+      <button class="btn" onclick="runPipeline('4', 0)">Stage 4: Build Export</button>
+    </div>
+  </div>
+</div>
+
+<!-- PRODUCTS PAGE -->
+<div class="container page page-hidden" id="page-products">
+  <div class="filter-bar">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="ready">Ready</button>
+    <button class="filter-btn" data-filter="missing_front">Missing Front</button>
+    <button class="filter-btn" data-filter="missing_back">Missing Back</button>
+    <button class="filter-btn" data-filter="needs_enrichment">Needs Enrichment</button>
+    <button class="filter-btn" data-filter="needs_review">Needs Review</button>
+  </div>
+  <div id="products-count" style="font-size:14px;color:var(--text-dim);margin-bottom:16px;"></div>
+  <div class="products-grid" id="products-grid"></div>
+  <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- PIPELINE PAGE -->
+<div class="container page page-hidden" id="page-pipeline">
+  <div class="card">
+    <h2>Run Pipeline</h2>
+    <div class="pipeline-controls">
+      <div>
+        <label>Stage</label>
+        <select id="stage-select">
+          <option value="all">All Stages (1→3→2→4)</option>
+          <option value="1">Stage 1: UPC Lookup</option>
+          <option value="2">Stage 2: Images</option>
+          <option value="3">Stage 3: Claude</option>
+          <option value="4">Stage 4: Build Export</option>
+        </select>
+      </div>
+      <div>
+        <label>Pilot Limit (0 = all)</label>
+        <input type="number" id="pilot-input" value="0" min="0" style="width:100px;">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:18px;">
+        <input type="checkbox" id="resume-check">
+        <label for="resume-check" style="margin:0;cursor:pointer;">Resume (skip cached)</label>
+      </div>
+      <button class="btn btn-primary" id="run-btn" onclick="runPipelineFromForm()" style="margin-top:18px;">
+        Run Pipeline
+      </button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Pipeline Log <span id="pipeline-spinner" style="display:none;"><span class="spinner"></span> Running...</span></h2>
+    <div class="log-box" id="log-box">Waiting for pipeline run...</div>
+  </div>
+</div>
+
+<!-- EXPORT PAGE -->
+<div class="container page page-hidden" id="page-export">
+  <div class="card">
+    <h2>Export for Shopify / Matrixify</h2>
+    <p style="color:var(--text-dim);margin-bottom:16px;">Download the generated Matrixify import file and images zip to upload to Shopify.</p>
+    <div class="btn-group">
+      <a class="btn btn-primary" href="/api/export" download>Download Matrixify XLSX</a>
+      <a class="btn" href="/api/export/images" download>Download Images ZIP</a>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Cache Management</h2>
+    <p style="color:var(--text-dim);margin-bottom:16px;">Clear caches to force a complete re-run of specific stages.</p>
+    <div class="btn-group">
+      <button class="btn btn-danger" onclick="clearCache('upcitemdb')">Clear UPC Cache</button>
+      <button class="btn btn-danger" onclick="clearCache('enrichment')">Clear Enrichment Cache</button>
+      <button class="btn btn-danger" onclick="clearCache('all')">Clear All Caches</button>
+    </div>
+  </div>
+</div>
+
+<!-- PRODUCT DETAIL MODAL -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────
+let currentPage = 'dashboard';
+let currentFilter = 'all';
+let currentProductPage = 1;
+let pollInterval = null;
+
+// ─── NAVIGATION ──────────────────────────────────────
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const page = tab.dataset.page;
+    document.querySelectorAll('.page').forEach(p => p.classList.add('page-hidden'));
+    document.getElementById('page-' + page).classList.remove('page-hidden');
+    currentPage = page;
+    if (page === 'dashboard') loadDashboard();
+    if (page === 'products') loadProducts();
+    if (page === 'pipeline') pollStatus();
+  });
+});
+
+// ─── DASHBOARD ───────────────────────────────────────
+async function loadDashboard() {
+  const r = await fetch('/api/dashboard');
+  const d = await r.json();
+
+  if (!d.has_input) {
+    document.getElementById('upload-section').style.display = 'block';
+    document.getElementById('stats-grid').innerHTML = '';
+    return;
+  }
+  document.getElementById('upload-section').style.display = 'none';
+
+  document.getElementById('stats-grid').innerHTML = `
+    <div class="stat-card"><div class="stat-number accent">${d.total}</div><div class="stat-label">Total Products</div></div>
+    <div class="stat-card"><div class="stat-number blue">${d.stage1_done}</div><div class="stat-label">UPC Data Found</div></div>
+    <div class="stat-card"><div class="stat-number green">${d.has_front}</div><div class="stat-label">Front Images</div></div>
+    <div class="stat-card"><div class="stat-number ${d.has_back > 0 ? 'green' : 'yellow'}">${d.has_back}</div><div class="stat-label">Back Images</div></div>
+    <div class="stat-card"><div class="stat-number ${d.stage3_done > 0 ? 'green' : 'yellow'}">${d.stage3_done}</div><div class="stat-label">Enriched (Claude)</div></div>
+    <div class="stat-card"><div class="stat-number green">${d.ready}</div><div class="stat-label">Ready to Import</div></div>
+    <div class="stat-card"><div class="stat-number red">${d.missing_front}</div><div class="stat-label">Missing Front</div></div>
+    <div class="stat-card"><div class="stat-number yellow">${d.missing_back}</div><div class="stat-label">Missing Back</div></div>
+  `;
+}
+
+// ─── FILE UPLOAD ─────────────────────────────────────
+const uploadArea = document.getElementById('upload-area');
+const fileInput = document.getElementById('file-input');
+
+uploadArea.addEventListener('click', () => fileInput.click());
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) uploadFile(fileInput.files[0]); });
+
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  uploadArea.innerHTML = '<p>Uploading...</p>';
+  const r = await fetch('/api/upload', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (d.error) {
+    uploadArea.innerHTML = `<p style="color:var(--red)">${d.error}</p>`;
+  } else {
+    uploadArea.innerHTML = `<p style="color:var(--green)">Uploaded successfully!</p>`;
+    setTimeout(loadDashboard, 1000);
+  }
+}
+
+// ─── PRODUCTS ────────────────────────────────────────
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    currentProductPage = 1;
+    loadProducts();
+  });
+});
+
+async function loadProducts() {
+  const r = await fetch(`/api/products?filter=${currentFilter}&page=${currentProductPage}&per_page=30`);
+  const d = await r.json();
+
+  document.getElementById('products-count').textContent = `${d.total} products`;
+
+  const grid = document.getElementById('products-grid');
+  if (d.products.length === 0) {
+    grid.innerHTML = '<p style="color:var(--text-dim);text-align:center;padding:40px;">No products found. Upload an input file and run the pipeline.</p>';
+    document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+
+  grid.innerHTML = d.products.map(p => `
+    <div class="product-card" onclick="showProduct('${p.sku}')">
+      <div class="product-images">
+        ${p.has_front
+          ? `<img src="/api/images/${p.sku}_front.jpg" alt="Front">`
+          : '<div class="placeholder">No Front Image</div>'}
+        ${p.has_back
+          ? `<img src="/api/images/${p.sku}_back.jpg" alt="Back">`
+          : '<div class="placeholder">No Back Image</div>'}
+      </div>
+      <div class="product-info">
+        <div class="product-title">${esc(p.title || p.warehouse_title)}</div>
+        <div class="product-meta">
+          ${p.ready ? '<span class="badge badge-green">Ready</span>' : '<span class="badge badge-yellow">Review</span>'}
+          ${p.has_front ? '<span class="badge badge-green">Front</span>' : '<span class="badge badge-red">No Front</span>'}
+          ${p.has_back ? '<span class="badge badge-blue">Back</span>' : '<span class="badge badge-yellow">No Back</span>'}
+          ${p.stage3_ok ? '<span class="badge badge-green">Enriched</span>' : '<span class="badge badge-red">Not Enriched</span>'}
+        </div>
+        <div class="product-sku">SKU: ${p.sku} &middot; UPC: ${p.upc} &middot; Pack: ${p.case_size}</div>
+      </div>
+    </div>
+  `).join('');
+
+  const totalPages = Math.ceil(d.total / d.per_page);
+  const pag = document.getElementById('pagination');
+  if (totalPages <= 1) { pag.innerHTML = ''; return; }
+  pag.innerHTML = `
+    <button class="btn btn-sm" ${currentProductPage <= 1 ? 'disabled' : ''} onclick="goPage(${currentProductPage - 1})">Prev</button>
+    <span class="page-info">Page ${currentProductPage} of ${totalPages}</span>
+    <button class="btn btn-sm" ${currentProductPage >= totalPages ? 'disabled' : ''} onclick="goPage(${currentProductPage + 1})">Next</button>
+  `;
+}
+
+function goPage(p) { currentProductPage = p; loadProducts(); }
+
+// ─── PRODUCT DETAIL ──────────────────────────────────
+async function showProduct(sku) {
+  const r = await fetch(`/api/products/${sku}`);
+  const p = await r.json();
+
+  const modal = document.getElementById('modal-content');
+  modal.innerHTML = `
+    <div class="modal-header">
+      <h2>${esc(p.title || p.warehouse_title)}</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+
+    <div class="modal-images">
+      <div class="modal-img-box">
+        <span class="img-label">FRONT</span>
+        ${p.has_front
+          ? `<img src="/api/images/${p.sku}_front.jpg" alt="Front">`
+          : `<div class="upload-zone" onclick="uploadImage('${p.sku}', 'front')">Click to upload front image</div>`}
+      </div>
+      <div class="modal-img-box">
+        <span class="img-label">BACK</span>
+        ${p.has_back
+          ? `<img src="/api/images/${p.sku}_back.jpg" alt="Back">`
+          : `<div class="upload-zone" onclick="uploadImage('${p.sku}', 'back')">Click to upload back image</div>`}
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-field"><label>SKU</label><div class="value">${p.sku}</div></div>
+      <div class="detail-field"><label>UPC</label><div class="value">${p.upc}</div></div>
+      <div class="detail-field"><label>Brand</label><div class="value">${esc(p.brand || '—')}</div></div>
+      <div class="detail-field"><label>Case Size</label><div class="value">${p.case_size}</div></div>
+      <div class="detail-field"><label>Weight (lb)</label><div class="value">${p.weight || '—'}</div></div>
+      <div class="detail-field"><label>Category</label><div class="value">${esc(p.category || '—')} > ${esc(p.subcategory || '—')}</div></div>
+      <div class="detail-field"><label>Cost</label><div class="value">$${p.cost.toFixed(2)}</div></div>
+      <div class="detail-field"><label>Price</label><div class="value">$${p.price.toFixed(2)}</div></div>
+      <div class="detail-field full"><label>Warehouse Title</label><div class="value">${esc(p.warehouse_title)}</div></div>
+      <div class="detail-field full"><label>Generated Title</label><div class="value">${esc(p.enrichment?.title || '—')}</div></div>
+      <div class="detail-field full"><label>Description</label><div class="value html-content">${p.description_html || '<em>Not yet generated</em>'}</div></div>
+      <div class="detail-field full"><label>SEO Title</label><div class="value">${esc(p.enrichment?.meta_title || '—')}</div></div>
+      <div class="detail-field full"><label>SEO Description</label><div class="value">${esc(p.enrichment?.meta_description || '—')}</div></div>
+      ${p.enrichment_warnings.length ? `<div class="detail-field full"><label>Warnings</label><div class="value" style="color:var(--yellow)">${p.enrichment_warnings.join(', ')}</div></div>` : ''}
+    </div>
+  `;
+
+  document.getElementById('modal-overlay').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+}
+
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+function uploadImage(sku, type) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async () => {
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    fd.append('sku', sku);
+    fd.append('type', type);
+    await fetch('/api/upload/image', { method: 'POST', body: fd });
+    showProduct(sku);
+  };
+  input.click();
+}
+
+// ─── PIPELINE ────────────────────────────────────────
+function runPipeline(stage, pilot) {
+  fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stage, pilot, resume: false }),
+  }).then(() => {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector('[data-page="pipeline"]').classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.add('page-hidden'));
+    document.getElementById('page-pipeline').classList.remove('page-hidden');
+    currentPage = 'pipeline';
+    startPolling();
+  });
+}
+
+function runPipelineFromForm() {
+  const stage = document.getElementById('stage-select').value;
+  const pilot = parseInt(document.getElementById('pilot-input').value) || 0;
+  const resume = document.getElementById('resume-check').checked;
+  fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stage, pilot, resume }),
+  }).then(() => startPolling());
+}
+
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollStatus, 1500);
+  pollStatus();
+}
+
+async function pollStatus() {
+  const r = await fetch('/api/status');
+  const s = await r.json();
+
+  const logBox = document.getElementById('log-box');
+  const spinner = document.getElementById('pipeline-spinner');
+  const runBtn = document.getElementById('run-btn');
+
+  if (s.running) {
+    spinner.style.display = 'inline';
+    runBtn.disabled = true;
+  } else {
+    spinner.style.display = 'none';
+    runBtn.disabled = false;
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+  }
+
+  if (s.log.length) {
+    logBox.innerHTML = s.log.map(l => {
+      let cls = '';
+      if (l.includes('ERROR')) cls = 'error';
+      else if (l.includes('WARN')) cls = 'warn';
+      else if (l.includes('complete') || l.includes('finished')) cls = 'success';
+      return `<div class="${cls}">${esc(l)}</div>`;
+    }).join('');
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+}
+
+// ─── CACHE ───────────────────────────────────────────
+async function clearCache(which) {
+  if (!confirm(`Clear ${which} cache? This will force re-processing.`)) return;
+  await fetch('/api/clear-cache', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ which }),
+  });
+  loadDashboard();
+}
+
+// ─── UTILS ───────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// ─── INIT ────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>

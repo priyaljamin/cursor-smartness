@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
 =============================================================
-  Master Value Wholesale - Catalog Addition Pipeline (v3)
-  Simplified: UPCitemdb only, one image per product
+  Master Value Wholesale - Catalog Addition Pipeline (v4)
+  Multi-image support: front + back per product
+  Fallback sources: UPCitemdb -> Open Food Facts -> Open Beauty Facts
 =============================================================
 
 WHAT THIS DOES:
-  Stage 1: UPCitemdb lookup for each UPC
-  Stage 2: Download ONE product image from UPCitemdb,
+  Stage 1: UPCitemdb lookup + fallback to Open Food/Beauty Facts
+  Stage 2: Download FRONT + BACK product images from all sources,
            pad to 1200x1200 with 10% white margin,
-           save as images/single/{sku}_front.jpg
+           save as images/single/{sku}_front.jpg and {sku}_back.jpg
   Stage 3: Claude generates title/brand/weight/description/category
   Stage 4: Build Matrixify xlsx + auto-zip the images folder
 
@@ -22,11 +23,13 @@ USAGE:
 OUTPUTS:
   output/matrixify_pilot.xlsx     <- main deliverable
   output/images.zip               <- upload alongside xlsx in Matrixify
-  output/images_missing.csv       <- UPCs UPCitemdb has no image for
+  output/images_missing.csv       <- UPCs with missing images
   output/pipeline_status.csv      <- per-UPC status tracker
   cache/upcitemdb.json            <- Stage 1 cache
+  cache/openfacts.json            <- Open Food/Beauty Facts cache
   cache/enrichment.json           <- Stage 3 cache
-  images/single/{sku}_front.jpg   <- downloaded + padded images
+  images/single/{sku}_front.jpg   <- downloaded + padded front images
+  images/single/{sku}_back.jpg    <- downloaded + padded back images
 =============================================================
 """
 
@@ -77,6 +80,9 @@ WEIGHT_MIN_LB       = 0.05
 WEIGHT_MAX_LB       = 150.0
 IMG_CANVAS_SIZE     = 1200    # final image dimensions in px
 IMG_PADDING_PCT     = 0.10    # white space on each side
+
+OFF_API_URL    = "https://world.openfoodfacts.org/api/v2/product"
+OBF_API_URL    = "https://world.openbeautyfacts.org/api/v2/product"
 
 
 # ============================================================
@@ -192,13 +198,55 @@ def upcitemdb_lookup(upc):
         return {"_error": "exception", "_msg": str(e)[:200]}
 
 
+def openfacts_lookup(upc, api_url):
+    """Lookup a UPC on Open Food Facts or Open Beauty Facts (public domain, no key needed)."""
+    try:
+        r = requests.get(f"{api_url}/{upc}.json",
+                         headers={"User-Agent": "MVW-Catalog/1.0"},
+                         timeout=15)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if data.get("status") != 1:
+            return None
+        p = data.get("product", {})
+        images = []
+        if p.get("image_front_url"):
+            images.append(p["image_front_url"])
+        if p.get("image_url"):
+            images.append(p["image_url"])
+        front_images = []
+        back_images = []
+        for key in sorted(p.keys()):
+            if key.startswith("image_front_") and key.endswith("_url") and p[key]:
+                front_images.append(p[key])
+            if key.startswith("image_back_") and key.endswith("_url") and p[key]:
+                back_images.append(p[key])
+        if not images and front_images:
+            images = front_images
+        return {
+            "title":        p.get("product_name", "") or "",
+            "brand":        p.get("brands", "") or "",
+            "description":  p.get("generic_name", "") or "",
+            "category":     p.get("categories", "") or "",
+            "size":         p.get("quantity", "") or "",
+            "weight":       p.get("product_quantity", "") or "",
+            "upc":          upc,
+            "images":       images,
+            "front_images": front_images,
+            "back_images":  back_images,
+            "_source":      "openfoodfacts" if "openfood" in api_url else "openbeautyfacts",
+        }
+    except Exception:
+        return None
+
+
 def stage1_enrich(df, resume=False):
     cache  = load_cache("upcitemdb") if resume else load_cache("upcitemdb")
     failed = load_cache("upcitemdb_failed") if resume else {}
+    off_cache = load_cache("openfacts")
 
     if not resume:
-        # When not resuming, treat ALL products as todo unless already in cache
-        # (cache is preserved across runs unless user manually deletes it)
         cache = load_cache("upcitemdb")
 
     todo = [u for u in df["upc"].tolist() if u not in cache and u not in failed]
@@ -228,7 +276,32 @@ def stage1_enrich(df, resume=False):
 
     save_cache("upcitemdb", cache)
     save_cache("upcitemdb_failed", failed)
-    print(f"[stage1] DONE - {len(cache)} hit, {len(failed)} miss")
+
+    # Fallback: try Open Food Facts + Open Beauty Facts for UPCs that UPCitemdb missed
+    fallback_todo = [u for u in df["upc"].tolist()
+                     if u not in off_cache and (u in failed or u not in cache)]
+    if fallback_todo:
+        print(f"[stage1] Trying {len(fallback_todo)} UPCs on Open Food/Beauty Facts...")
+        for upc in tqdm(fallback_todo, desc="OpenFacts"):
+            for api_url in [OFF_API_URL, OBF_API_URL]:
+                result = openfacts_lookup(upc, api_url)
+                if result:
+                    off_cache[upc] = result
+                    if upc in failed:
+                        del failed[upc]
+                    if upc not in cache:
+                        cache[upc] = result
+                    break
+            else:
+                off_cache[upc] = {"_error": "not_found"}
+            time.sleep(0.5)
+        save_cache("openfacts", off_cache)
+        save_cache("upcitemdb", cache)
+        save_cache("upcitemdb_failed", failed)
+
+    total_hit = sum(1 for u in df["upc"].tolist() if u in cache and "_error" not in cache.get(u, {}))
+    total_miss = len(df) - total_hit
+    print(f"[stage1] DONE - {total_hit} hit, {total_miss} miss (across all sources)")
     return cache, failed
 
 
@@ -298,71 +371,112 @@ def try_download_url(url, out_path):
         return False
 
 
-def fetch_one_image(upc, sku, udb_data):
-    """Try UPCitemdb image URLs in order. Save first that works as {sku}_front.jpg, padded."""
-    out_path = IMAGES_DIR / f"{sku}_front.jpg"
+def _pick_image_urls(udb_data, off_cache_entry=None):
+    """Gather front and back image URLs from all available sources."""
+    front_urls = []
+    back_urls = []
 
-    if out_path.exists() and out_path.stat().st_size > 1000:
-        return True, "cached"
+    for url in (udb_data.get("images") or [])[:10]:
+        front_urls.append(url)
 
-    for url in (udb_data.get("images") or [])[:5]:
-        if try_download_url(url, out_path):
-            process_image_with_padding(out_path)
-            return True, "upcitemdb"
+    if off_cache_entry and "_error" not in off_cache_entry:
+        for url in (off_cache_entry.get("front_images") or []):
+            if url not in front_urls:
+                front_urls.append(url)
+        for url in (off_cache_entry.get("back_images") or []):
+            back_urls.append(url)
+        for url in (off_cache_entry.get("images") or []):
+            if url not in front_urls:
+                front_urls.append(url)
 
-    return False, "no_image_in_upcitemdb"
+    return front_urls[:10], back_urls[:10]
+
+
+def fetch_product_images(upc, sku, udb_data, off_data=None):
+    """Download front + back images. Returns dict with status per image type."""
+    result = {"front": False, "back": False, "front_source": "", "back_source": ""}
+    front_urls, back_urls = _pick_image_urls(udb_data, off_data)
+
+    front_path = IMAGES_DIR / f"{sku}_front.jpg"
+    back_path = IMAGES_DIR / f"{sku}_back.jpg"
+
+    if front_path.exists() and front_path.stat().st_size > 1000:
+        result["front"] = True
+        result["front_source"] = "cached"
+    else:
+        for url in front_urls:
+            if try_download_url(url, front_path):
+                process_image_with_padding(front_path)
+                result["front"] = True
+                result["front_source"] = "downloaded"
+                break
+
+    if back_path.exists() and back_path.stat().st_size > 1000:
+        result["back"] = True
+        result["back_source"] = "cached"
+    else:
+        for url in back_urls:
+            if try_download_url(url, back_path):
+                process_image_with_padding(back_path)
+                result["back"] = True
+                result["back_source"] = "downloaded"
+                break
+
+    return result
 
 
 def stage2_images(df, upcdb_cache, resume=False):
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    off_cache = load_cache("openfacts")
     missing = []
-    success = 0
-    source_counts = {}
+    front_ok = 0
+    back_ok = 0
 
     todo = []
     for _, row in df.iterrows():
         upc = row["upc"]
         sku = row["variant_sku"]
-        out_path = IMAGES_DIR / f"{sku}_front.jpg"
-        if resume and out_path.exists() and out_path.stat().st_size > 1000:
-            success += 1
-            source_counts["cached"] = source_counts.get("cached", 0) + 1
+        front_path = IMAGES_DIR / f"{sku}_front.jpg"
+        back_path = IMAGES_DIR / f"{sku}_back.jpg"
+        if resume and front_path.exists() and front_path.stat().st_size > 1000:
+            front_ok += 1
+            if back_path.exists() and back_path.stat().st_size > 1000:
+                back_ok += 1
             continue
-        todo.append((upc, sku, upcdb_cache.get(upc, {})))
+        todo.append((upc, sku, upcdb_cache.get(upc, {}), off_cache.get(upc)))
 
-    print(f"[stage2] {len(todo)} images to fetch ({success} cached)")
+    print(f"[stage2] {len(todo)} products to fetch images for ({front_ok} front cached)")
 
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as ex:
-        futures = {ex.submit(fetch_one_image, u, s, udb): (u, s, udb)
-                   for u, s, udb in todo}
+        futures = {ex.submit(fetch_product_images, u, s, udb, off): (u, s, udb)
+                   for u, s, udb, off in todo}
         for fut in tqdm(as_completed(futures), total=len(futures), desc="Images"):
             upc, sku, udb = futures[fut]
-            ok, source = fut.result()
-            source_counts[source] = source_counts.get(source, 0) + 1
-            if ok:
-                success += 1
-            else:
+            res = fut.result()
+            if res["front"]:
+                front_ok += 1
+            if res["back"]:
+                back_ok += 1
+            if not res["front"]:
                 missing.append({
                     "upc": upc,
                     "variant_sku": sku,
-                    "reason": source,
-                    "upcitemdb_title": udb.get("title", ""),
-                    "upcitemdb_brand": udb.get("brand", ""),
+                    "reason": "no_front_image",
+                    "has_back": "yes" if res["back"] else "no",
+                    "title": udb.get("title", ""),
+                    "brand": udb.get("brand", ""),
                 })
 
     if missing:
         MISSING_CSV.parent.mkdir(parents=True, exist_ok=True)
         with MISSING_CSV.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=["upc", "variant_sku", "reason",
-                                              "upcitemdb_title", "upcitemdb_brand"])
+                                              "has_back", "title", "brand"])
             w.writeheader()
             w.writerows(missing)
-        print(f"[stage2] {len(missing)} missing -> {MISSING_CSV}")
+        print(f"[stage2] {len(missing)} missing front images -> {MISSING_CSV}")
 
-    print(f"[stage2] DONE - {success} downloaded, {len(missing)} missing")
-    if source_counts:
-        breakdown = ", ".join(f"{k}:{v}" for k, v in sorted(source_counts.items(), key=lambda x: -x[1]))
-        print(f"[stage2] sources: {breakdown}")
+    print(f"[stage2] DONE - front: {front_ok}, back: {back_ok}, missing: {len(missing)}")
 
 
 # ============================================================
@@ -579,13 +693,15 @@ def make_handle(title):
     return h[:120]
 
 
-def assess_review_reasons(e, u, img_exists):
+def assess_review_reasons(e, u, front_exists, back_exists):
     reasons = []
     if "_error" in e or not e:
         reasons.append("enrichment_failed")
         return reasons
-    if not img_exists:
-        reasons.append("no_image")
+    if not front_exists:
+        reasons.append("no_front_image")
+    if not back_exists:
+        reasons.append("no_back_image")
     if not u or "_error" in u:
         reasons.append("upcitemdb_miss")
     if e.get("category_confidence") == "low":
@@ -618,17 +734,20 @@ def stage4_build(df, upcdb_cache, enrichment_cache):
 
         e = enrichment_cache.get(upc, {})
         u = upcdb_cache.get(upc, {})
-        img_path = IMAGES_DIR / f"{sku}_front.jpg"
-        img_exists = img_path.exists() and img_path.stat().st_size > 1000
+        front_path = IMAGES_DIR / f"{sku}_front.jpg"
+        back_path = IMAGES_DIR / f"{sku}_back.jpg"
+        front_exists = front_path.exists() and front_path.stat().st_size > 1000
+        back_exists = back_path.exists() and back_path.stat().st_size > 1000
 
-        review_reasons = assess_review_reasons(e, u, img_exists)
-        is_ready = len(review_reasons) == 0
+        review_reasons = assess_review_reasons(e, u, front_exists, back_exists)
+        is_ready = all(r not in ("enrichment_failed", "no_front_image") for r in review_reasons)
 
         status_rows.append({
             "upc": upc,
             "variant_sku": sku,
             "stage1_upcitemdb": "OK" if u and "_error" not in u else "MISS",
-            "stage2_image":     "OK" if img_exists else "MISS",
+            "stage2_front":     "OK" if front_exists else "MISS",
+            "stage2_back":      "OK" if back_exists else "MISS",
             "stage3_claude":    "OK" if e and "_error" not in e else "MISS",
             "ready":            "YES" if is_ready else "NO",
             "review_reason":    ",".join(review_reasons),
@@ -682,15 +801,23 @@ def stage4_build(df, upcdb_cache, enrichment_cache):
             "Variant Requires Shipping":   "TRUE",
             "Variant Taxable":             "TRUE",
 
-            "Image Src":               f"{sku}_front.jpg" if img_exists else "",
-            "Image Position":          1 if img_exists else "",
-            "Image Alt Text":          title if img_exists else "",
+            "Image Src":               f"{sku}_front.jpg" if front_exists else "",
+            "Image Position":          1 if front_exists else "",
+            "Image Alt Text":          title if front_exists else "",
 
             "Metafield: custom.case_size [number_integer]":           case_size,
             "Metafield: custom.master_sku [single_line_text_field]":  row.get("master_sku", ""),
             "Metafield: custom.subcategory [single_line_text_field]": e.get("subcategory", ""),
             "Metafield: custom.category_confidence [single_line_text_field]": e.get("category_confidence", ""),
         })
+
+        if back_exists:
+            rows_out.append({
+                "Handle":          handle,
+                "Image Src":       f"{sku}_back.jpg",
+                "Image Position":  2,
+                "Image Alt Text":  f"{title} - Back",
+            })
 
     # Status tracker
     STATUS_CSV.parent.mkdir(parents=True, exist_ok=True)
