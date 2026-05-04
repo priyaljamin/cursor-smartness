@@ -1,3 +1,7 @@
 __pycache__/
 .venv/
 test_output/
+cache/
+images/
+input/
+output/
