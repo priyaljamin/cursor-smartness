@@ -8,9 +8,12 @@
 
 ### Dependencies
 
-Install with: `pip install pandas openpyxl requests anthropic tqdm pillow`
+Dependencies are listed in `requirements.txt`. Install into a virtualenv:
 
-There is no `requirements.txt` in the repo. The dependency list is in the README `Setup` section.
+```bash
+pip install virtualenv  # system-level, needed if python3.12-venv is unavailable
+virtualenv .venv && source .venv/bin/activate && pip install -r requirements.txt
+```
 
 ### Running the pipeline
 
@@ -37,5 +40,5 @@ The pipeline expects an xlsx at `input/MVW_QK_CATALOG_ADDITION_05_01_2026.xlsx`.
 - Stages 1 and 2 work without any API key (UPCitemdb key is hardcoded). Stage 3 requires `ANTHROPIC_API_KEY`.
 - Caches persist in `cache/` dir. Delete `cache/*.json` to force a full re-run.
 - `--resume` flag skips items already cached/downloaded.
-- `python3.12-venv` system package is needed to create the virtualenv.
+- If `python3 -m venv` fails, use `pip install virtualenv && virtualenv .venv` as an alternative.
 - The `input/` directory and xlsx file are not in the repo — they must be provided separately.
